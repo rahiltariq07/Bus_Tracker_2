@@ -1,0 +1,18 @@
+﻿
+
+<!-- Additional admin dashboard content can go here -->
+@{
+    ViewData["Title"] = "Admin Dashboard";
+}
+
+<h2>@ViewData["Title"]</h2>
+
+@if (TempData["SuccessMessage"] != null)
+{
+    <div class="alert alert-success">
+        @TempData["SuccessMessage"]
+    </div>
+}
+
+<a class="btn btn-primary" asp-controller="Admin" asp-action="RegisterUser">Register New User</a>
+<!-- Additional admin dashboard content -->

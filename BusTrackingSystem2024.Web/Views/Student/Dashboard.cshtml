@@ -1,0 +1,154 @@
+﻿@{
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    ViewData["Title"] = "Student Dashboard";
+    // Use a unique identifier for the logged-in student
+    // var currentStudentId = User.Identity.Name;
+}
+
+<h2>@ViewData["Title"]</h2>
+
+<div id="map" style="height:500px; margin-bottom:20px;"></div>
+
+<button id="getLocation" class="btn btn-primary">Get Location</button>
+<button id="cancelTrip" class="btn btn-danger">Cancel Trip</button>
+
+@section Scripts {
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.0/signalr.min.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+        // Assign the unique student ID from Razor to a JavaScript variable
+        var currentStudentId = User.Identity.Name;
+        console.log("Current Student ID:", currentStudentId);
+
+        // Define icons
+        var busIcon = L.icon({ iconUrl: '/images/bus.png', iconSize: [50, 50] });
+        var bigYellowIcon = L.icon({ iconUrl: '/images/big_yellow.png', iconSize: [40, 40] });
+        var smallYellowIcon = L.icon({ iconUrl: '/images/small_yellow.png', iconSize: [25, 25] });
+        var bigGreenIcon = L.icon({ iconUrl: '/images/big_green.png', iconSize: [40, 40] });
+        var smallGreenIcon = L.icon({ iconUrl: '/images/small_green.png', iconSize: [25, 25] });
+        var bigPurpleIcon = L.icon({ iconUrl: '/images/big_purple.png', iconSize: [40, 40] });
+        var smallPurpleIcon = L.icon({ iconUrl: '/images/small_purple.png', iconSize: [25, 25] });
+
+        var map, studentMarker, driverMarker, routingControl;
+        var connection = new signalR.HubConnectionBuilder().withUrl("/tripHub").build();
+
+        console.log("Initializing map on Student Dashboard...");
+        function initializeMap() {
+            if (map) { map.remove(); }
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            console.log("Map initialized on Student Dashboard.");
+        }
+        initializeMap();
+
+        function updateRouting() {
+            if (studentMarker && driverMarker) {
+                if (routingControl) {
+                    routingControl.setWaypoints([studentMarker.getLatLng(), driverMarker.getLatLng()]);
+                } else {
+                    routingControl = L.Routing.control({
+                        waypoints: [studentMarker.getLatLng(), driverMarker.getLatLng()],
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        createMarker: function() { return null; },
+                        itinerary: { container: null } // Hide directions panel
+                    }).addTo(map);
+                }
+                console.log("Routing updated on Student Dashboard.");
+            }
+        }
+        function clearRouting() {
+            if (routingControl) {
+                map.removeControl(routingControl);
+                routingControl = null;
+                console.log("Routing cleared on Student Dashboard.");
+            }
+        }
+
+        connection.on("ReceiveTripUpdate", function(data) {
+            console.log("Student Dashboard received update:", data);
+            var updateType = data.type ? data.type.toLowerCase() : "";
+            if (updateType === "driverlocationupdate") {
+                if (!driverMarker) {
+                    driverMarker = L.marker([data.driverLat, data.driverLng], { icon: busIcon }).addTo(map)
+                                    .bindPopup("Driver Location").openPopup();
+                    console.log("Created driver marker on Student Dashboard with bus icon.");
+                } else {
+                    driverMarker.setLatLng([data.driverLat, data.driverLng]);
+                    driverMarker.setIcon(busIcon);
+                    console.log("Updated driver marker on Student Dashboard with bus icon.");
+                }
+                updateRouting();
+            }
+            else if (updateType === "studentlocationupdate") {
+                if (!studentMarker) {
+                    studentMarker = L.marker([data.studentLat, data.studentLng], { icon: bigYellowIcon }).addTo(map)
+                                    .bindPopup("Your Location").openPopup();
+                    console.log("Created student marker on Student Dashboard.");
+                } else {
+                    studentMarker.setLatLng([data.studentLat, data.studentLng]);
+                    console.log("Updated student marker on Student Dashboard.");
+                }
+                updateRouting();
+            }
+            else if (updateType === "tripcancelled" || updateType === "studentpickedup") {
+                if (studentMarker) { map.removeLayer(studentMarker); studentMarker = null; }
+                if (driverMarker) { map.removeLayer(driverMarker); driverMarker = null; }
+                clearRouting();
+                console.log("Trip cancelled or student picked up on Student Dashboard.");
+            }
+        });
+
+        connection.start().then(function() {
+            console.log("SignalR connection started on Student Dashboard.");
+        }).catch(function(err) {
+            console.error("SignalR connection error on Student Dashboard:", err.toString());
+        });
+
+        // Get Location: use geolocation API to update student's location
+        document.getElementById("getLocation").addEventListener("click", function() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    var lat = position.coords.latitude;
+                    var lng = position.coords.longitude;
+                    console.log("Student location obtained:", lat, lng);
+                    if (!studentMarker) {
+                        studentMarker = L.marker([lat, lng], { icon: bigYellowIcon }).addTo(map)
+                                        .bindPopup("Your Location").openPopup();
+                        console.log("Created student marker via Get Location.");
+                    } else {
+                        studentMarker.setLatLng([lat, lng]);
+                        console.log("Updated student marker via Get Location.");
+                    }
+                    map.setView([lat, lng], 13);
+                    updateRouting();
+                    connection.invoke("UpdateStudentLocation", { StudentId: currentStudentId, StudentLat: lat, StudentLng: lng })
+                        .then(function() { console.log("Student location broadcasted."); })
+                        .catch(function(err) { console.error(err.toString()); });
+                }, function(error) {
+                    console.error("Error getting student location:", error.message);
+                });
+            } else {
+                alert("Geolocation is not supported by your browser.");
+            }
+        });
+
+        // Cancel Trip: update student's marker to big purple and broadcast cancellation
+        document.getElementById("cancelTrip").addEventListener("click", function() {
+            if (studentMarker) {
+                studentMarker.setIcon(bigPurpleIcon);
+                console.log("Student marker updated to big purple (cancelled).");
+            }
+            clearRouting();
+            connection.invoke("CancelTrip", { StudentId: currentStudentId })
+                .then(function() { console.log("CancelTrip invoked from Student Dashboard."); })
+                .catch(function(err) { console.error(err.toString()); });
+            alert("Trip cancelled, your location marker updated.");
+        });
+    </script>
+}

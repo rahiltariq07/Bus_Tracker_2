@@ -1,0 +1,73 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <!-- Mobile Responsive -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - BusTrackingSystem2024.Web</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" crossorigin="" />
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <!-- Your custom site CSS -->
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body style="margin:0; padding:0; overflow-x:hidden; background-color:#fff;">
+
+    <!-- Header: Yellow gradient, border-radius bottom, single row -->
+    <header class="d-flex align-items-center justify-content-between"
+            style="
+            background: linear-gradient(180deg, #FC0 0%, #FB0 100%);
+            border-radius: 0 0 20px 20px;
+            padding: 0.5rem 1rem;
+            min-height: 65px; /* Adjust as needed for your desired navbar height */
+        ">
+        <!-- Left: Bus Logo -->
+        <div>
+            <img src="~/images/BusLogo.png" alt="Bus Logo" style="max-width:80px; height:auto;" />
+        </div>
+
+        <!-- Right side: Partial (email + logout) stacked, plus user icon -->
+        <div class="d-flex align-items-center" style="gap:0.5rem;">
+            <!-- This partial now displays email above logout -->
+            <partial name="_LoginPartial" />
+            <!-- Default user image to the right of the partial -->
+            <img src="~/images/defaultUser.png" alt="User" style="height:35px; border-radius:50%;" />
+        </div>
+    </header>
+
+
+    <!-- Main Content -->
+    <main>
+        @RenderBody()
+    </main>
+
+    <!-- Footer (fixed at bottom) -->
+    <footer class="d-flex justify-content-around align-items-center"
+            style="
+                position: fixed; bottom:0; left:0; right:0;
+                height:50px;
+                background:#22211F;
+                z-index:9999;
+            ">
+        <!-- Privacy -->
+        <a asp-controller="Home" asp-action="Privacy" style="text-decoration:none;">
+            <img src="~/images/privacyIcon.png" alt="Privacy" style="height:24px;" />
+        </a>
+        <!-- Home -->
+        <a asp-controller="Home" asp-action="Index" style="text-decoration:none;">
+            <img src="~/images/homeIcon.png" alt="Home" style="height:24px;" />
+        </a>
+        <!-- Driver Dashboard -->
+        <a asp-controller="Driver" asp-action="Dashboard" style="text-decoration:none;">
+            <img src="~/images/driverIcon.png" alt="Driver Dashboard" style="height:24px;" />
+        </a>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    @RenderSection("Scripts", required: false)
+</body>
+</html>

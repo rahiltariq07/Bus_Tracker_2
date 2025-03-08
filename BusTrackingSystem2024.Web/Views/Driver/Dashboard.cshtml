@@ -1,0 +1,279 @@
+﻿@{
+    Layout = "~/Views/Shared/_Layout.cshtml";
+    ViewData["Title"] = "Driver Dashboard";
+}
+
+<!-- Full-screen map area -->
+<div id="map" style="width: 100%; height: calc(100vh - 50px - 1rem);"></div>
+
+<!-- Black control panel above footer -->
+<div class="text-white p-3" style="position: fixed; bottom: 50px; left: 0; right: 0; background: #373633; border-top-left-radius: 20px; border-top-right-radius: 20px; z-index: 9999;">
+    <div class="container-fluid">
+        <div class="row mb-2">
+            <div class="col d-flex flex-column align-items-start" style="background:#22211F; border-radius:10px; padding:0.5rem; margin-right:1.32rem;">
+                <span id="nextStopDistance" class="fw-bold">200 m</span>
+                <span id="eta">ETA 5m</span>
+            </div>
+            <div class="col d-flex flex-column align-items-start" style="background:#22211F; border-radius:10px; padding:0.5rem;">
+                <div>Completed: <span id="completedCount" class="fw-bold">6</span></div>
+                <div>Up-coming: <span id="upcomingCount" class="fw-bold">4</span></div>
+                <div>Absent: <span id="absentCount" class="fw-bold">1</span></div>
+            </div>
+        </div>
+        <div class="row mb-2">
+            <div class="col-12">
+                <button id="pickedUp" class="btn w-100" style="border-radius:8px; background: linear-gradient(180deg, #02FFA2 0%, #07DD76 100%); color:#005B33; font-weight:600;">
+                    Complete Pick Up
+                </button>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-6">
+                <button id="startTrip" class="btn w-100" style="border-radius:8px; background:#FFC701; color:#4E3707; font-weight:600;">
+                    Start Trip
+                </button>
+            </div>
+            <div class="col-6">
+                <button id="endTrip" class="btn w-100" style="border-radius:8px; background: linear-gradient(180deg, #BD3335 0%, #4A5DBB 100%); color:#FFCAA4; font-weight:600;">
+                    End Trip
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <!-- Include Leaflet, SignalR, and Routing Machine scripts -->
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.0/signalr.min.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+        // Define custom icons
+        var busIcon = L.icon({ iconUrl: '/images/bus.png', iconSize: [50, 50] });
+        var bigYellowIcon = L.icon({ iconUrl: '/images/big_yellow.png', iconSize: [40, 40] });
+        var smallYellowIcon = L.icon({ iconUrl: '/images/small_yellow.png', iconSize: [25, 25] });
+        var bigGreenIcon = L.icon({ iconUrl: '/images/big_green.png', iconSize: [40, 40] });
+        var smallGreenIcon = L.icon({ iconUrl: '/images/small_green.png', iconSize: [25, 25] });
+        var bigPurpleIcon = L.icon({ iconUrl: '/images/big_purple.png', iconSize: [40, 40] });
+        var smallPurpleIcon = L.icon({ iconUrl: '/images/small_purple.png', iconSize: [25, 25] });
+
+        var map, driverMarker, routingControl;
+        // Dictionary to hold multiple student markers keyed by StudentId
+        var studentMarkers = {};
+        var connection = new signalR.HubConnectionBuilder().withUrl("/tripHub").build();
+        var watchId; // for continuous driver tracking
+
+        console.log("Initializing map on Driver Dashboard...");
+        function initializeMap() {
+            if (map) { map.remove(); }
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            console.log("Map initialized.");
+        }
+        initializeMap();
+
+        // Helper: Get nearest student marker (if needed for routing)
+        function getNearestStudentMarker() {
+            if (!driverMarker) return null;
+            var nearest = null;
+            var minDistance = Infinity;
+            for (var key in studentMarkers) {
+                var marker = studentMarkers[key];
+                var d = getDistance(driverMarker.getLatLng().lat, driverMarker.getLatLng().lng,
+                                    marker.getLatLng().lat, marker.getLatLng().lng);
+                if (d < minDistance) {
+                    minDistance = d;
+                    nearest = marker;
+                }
+            }
+            return nearest;
+        }
+
+        function updateRouting() {
+            var nearestStudent = getNearestStudentMarker();
+            if (driverMarker && nearestStudent) {
+                if (routingControl) {
+                    routingControl.setWaypoints([driverMarker.getLatLng(), nearestStudent.getLatLng()]);
+                } else {
+                    routingControl = L.Routing.control({
+                        waypoints: [driverMarker.getLatLng(), nearestStudent.getLatLng()],
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        createMarker: function() { return null; },
+                        itinerary: { container: null } // Hide directions panel
+                    }).addTo(map);
+                }
+                console.log("Routing updated to nearest student.");
+            }
+        }
+        function clearRouting() {
+            if (routingControl) {
+                map.removeControl(routingControl);
+                routingControl = null;
+                console.log("Routing cleared.");
+            }
+        }
+
+        // Haversine formula to calculate distance (in km)
+        function getDistance(lat1, lon1, lat2, lon2) {
+            var R = 6371;
+            var dLat = deg2rad(lat2 - lat1);
+            var dLon = deg2rad(lon2 - lon1);
+            var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+        function deg2rad(deg) { return deg * (Math.PI / 180); }
+
+        // SignalR handler with debug logging
+        connection.on("ReceiveTripUpdate", function(data) {
+            console.log("Driver Dashboard received update:", data);
+            var updateType = data.type ? data.type.toLowerCase() : "";
+            if (updateType === "studentlocationupdate") {
+                var studentId = data.studentId;
+                if (!studentMarkers[studentId]) {
+                    studentMarkers[studentId] = L.marker([data.studentLat, data.studentLng], { icon: bigYellowIcon })
+                        .addTo(map)
+                        .bindPopup("Student " + studentId);
+                    console.log("Created marker for student:", studentId);
+                } else {
+                    studentMarkers[studentId].setLatLng([data.studentLat, data.studentLng]);
+                    console.log("Updated marker for student:", studentId);
+                }
+                if (driverMarker) {
+                    var d = getDistance(driverMarker.getLatLng().lat, driverMarker.getLatLng().lng,
+                                        studentMarkers[studentId].getLatLng().lat, studentMarkers[studentId].getLatLng().lng);
+                    studentMarkers[studentId].setIcon(d < 0.5 ? smallYellowIcon : bigYellowIcon);
+                    console.log("Adjusted icon for student:", studentId, "Distance:", d);
+                }
+                updateRouting();
+            }
+            else if (updateType === "driverlocationupdate") {
+                console.log("Received driver location update:", data);
+                if (!driverMarker) {
+                    driverMarker = L.marker([data.driverLat, data.driverLng], { icon: busIcon }).addTo(map)
+                                    .bindPopup("Your Location").openPopup();
+                    console.log("Created driver marker.");
+                } else {
+                    driverMarker.setLatLng([data.driverLat, data.driverLng]);
+                    driverMarker.setIcon(busIcon);
+                    console.log("Updated driver marker.");
+                }
+                map.setView([data.driverLat, data.driverLng], 13);
+                updateRouting();
+                // Update all student markers based on new driver location
+                for (var id in studentMarkers) {
+                    var d = getDistance(driverMarker.getLatLng().lat, driverMarker.getLatLng().lng,
+                                        studentMarkers[id].getLatLng().lat, studentMarkers[id].getLatLng().lng);
+                    studentMarkers[id].setIcon(d < 0.5 ? smallYellowIcon : bigYellowIcon);
+                    console.log("Updated student marker icon for", id, "Distance:", d);
+                }
+            }
+            else if (updateType === "studentpickedup") {
+                var studentId = data.studentId;
+                if (studentMarkers[studentId]) {
+                    studentMarkers[studentId].setIcon(bigGreenIcon);
+                    console.log("Student", studentId, "picked up. Icon set to big green.");
+                }
+            }
+            else if (updateType === "tripcancelled") {
+                var studentId = data.studentId;
+                if (studentMarkers[studentId]) {
+                    studentMarkers[studentId].setIcon(bigPurpleIcon);
+                    console.log("Trip cancelled for student", studentId, ". Icon set to big purple.");
+                }
+            }
+            else if (updateType === "tripended") {
+                if (driverMarker) {
+                    map.removeLayer(driverMarker);
+                    driverMarker = null;
+                    console.log("Trip ended. Driver marker removed.");
+                }
+                clearRouting();
+            }
+        });
+
+        connection.start().then(function() {
+            console.log("SignalR connection started on Driver Dashboard.");
+        }).catch(function(err) {
+            console.error("SignalR connection error:", err.toString());
+        });
+
+        // Start Trip: use watchPosition for smooth driver updates
+        document.getElementById('startTrip').addEventListener('click', function() {
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition(function(position) {
+                    var lat = position.coords.latitude;
+                    var lng = position.coords.longitude;
+                    console.log("Driver position updated:", lat, lng);
+                    if (!driverMarker) {
+                        driverMarker = L.marker([lat, lng], { icon: busIcon }).addTo(map)
+                                        .bindPopup("Your Location").openPopup();
+                        console.log("Created driver marker.");
+                    } else {
+                        driverMarker.setLatLng([lat, lng]);
+                        driverMarker.setIcon(busIcon);
+                        console.log("Updated driver marker position.");
+                    }
+                    map.setView([lat, lng], 13);
+                    updateRouting();
+                    connection.invoke("UpdateDriverLocation", { DriverLat: lat, DriverLng: lng })
+                        .then(function() { console.log("Driver location broadcasted."); })
+                        .catch(function(err) { console.error(err.toString()); });
+                }, function(error) {
+                    console.error("Error getting driver location:", error.message);
+                }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+            } else {
+                alert("Geolocation is not supported by your browser.");
+            }
+        });
+
+        // End Trip: clear the watch and remove driver marker
+        document.getElementById('endTrip').addEventListener('click', function() {
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+                console.log("Stopped watching driver location.");
+            }
+            if (driverMarker) {
+                map.removeLayer(driverMarker);
+                driverMarker = null;
+                console.log("Driver marker removed.");
+            }
+            clearRouting();
+            connection.invoke("EndTrip").then(function() {
+                console.log("EndTrip invoked.");
+            }).catch(function(err) { console.error(err.toString()); });
+            alert("Trip ended, your location removed.");
+        });
+
+        // Picked Up Student: update nearest student's marker to big green and broadcast update
+        document.getElementById('pickedUp').addEventListener('click', function() {
+            var nearest = getNearestStudentMarker();
+            if (nearest) {
+                var studentId = null;
+                for (var id in studentMarkers) {
+                    if (studentMarkers[id] === nearest) {
+                        studentId = id;
+                        break;
+                    }
+                }
+                if (studentId) {
+                    nearest.setIcon(bigGreenIcon);
+                    connection.invoke("StudentPickedUp", { StudentId: studentId })
+                        .then(function() { console.log("StudentPickedUp invoked for", studentId); })
+                        .catch(function(err) { console.error(err.toString()); });
+                    alert("Student picked up, marker updated.");
+                }
+            } else {
+                alert("No student marker found to update.");
+            }
+        });
+    </script>
+}
